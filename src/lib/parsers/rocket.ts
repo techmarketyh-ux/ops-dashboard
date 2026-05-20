@@ -1,51 +1,35 @@
 import * as XLSX from 'xlsx'
 import { RocketOrder, RocketStatus } from '../types'
 
-// Estados detectados en el reporte real:
-// Entregado → entregado
-// Devuelto - recepcionado en almacén / Devuelto - en tránsito → devuelto
-// Enviado / En ruta / Recogida en Agencia → en_transito (tienen guía, no entregado ni devuelto)
-// Rechazado / NO Confirmable / Duplicado / NOVEDAD → no_confirmado
-// Nuevo / Pendiente de confirmación / (vacío) → pendiente
+// Estados en tránsito = despachados pero no entregados ni devueltos
+const IN_TRANSIT_STATES = new Set([
+  'enviado', 'en ruta', 'recogida en agencia',
+  'en tránsito', 'en transito',
+  'novedad',
+  'confirmado - pendiente de preparación',
+  'confirmado - pendiente de preparacion'
+])
 
 export function classifyRocketStatus(raw: string): RocketStatus {
   const s = raw.toLowerCase().trim()
-
   if (s === 'entregado') return 'entregado'
-
   if (s.startsWith('devuelto')) return 'devuelto'
-
-  if (
-    s === 'enviado' ||
-    s === 'en ruta' ||
-    s === 'recogida en agencia' ||
-    s === 'en tránsito' ||
-    s === 'en transito'
-  ) return 'en_transito'
-
-  if (
-    s === 'rechazado' ||
-    s === 'no confirmable' ||
-    s === 'duplicado' ||
-    s === 'novedad'
-  ) return 'no_confirmado'
-
-  // Nuevo, Pendiente de confirmación, vacío
+  if (IN_TRANSIT_STATES.has(s)) return 'en_transito'
+  if (s === 'rechazado' || s === 'no confirmable' || s === 'duplicado') return 'no_confirmado'
   return 'pendiente'
 }
 
 function parseDate(val: unknown): string {
   if (!val) return ''
   const s = String(val).trim()
-  // Formato DD-MM-YYYY → YYYY-MM-DD
   const m = s.match(/^(\d{2})-(\d{2})-(\d{4})$/)
   if (m) return `${m[3]}-${m[2]}-${m[1]}`
-  return s
+  return s.slice(0, 10)
 }
 
 export function parseRocketReport(
   buffer: ArrayBuffer,
-  mappings: Record<string, string> // rocketName → productName (campaña)
+  mappings: Record<string, string>
 ): RocketOrder[] {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: false })
   const ws = wb.Sheets[wb.SheetNames[0]]
@@ -59,16 +43,12 @@ export function parseRocketReport(
 
     const rawStatus = String(row['ESTADO'] || '').trim()
     const status = classifyRocketStatus(rawStatus)
-
     const shopifyId = String(row['ID pedido Shopify'] || '').trim()
     const isManual = String(row['¿Confirmado manual?'] || '0').trim() === '1'
-
-    // Canal: si tiene ID de Shopify y no es manual = Shopify; si manual o sin ID = WhatsApp
     const channel: 'shopify' | 'whatsapp' =
       shopifyId && shopifyId !== '0' && !isManual ? 'shopify' : 'whatsapp'
-
-    // Busca el nombre de campaña mapeado; si no hay mapeo usa el nombre de Rocket
     const product = mappings[rocketProduct] || rocketProduct
+    const carrier = String(row['TRANSPORTADORA'] || '').trim()
 
     orders.push({
       id: String(row['ID PEDIDO'] || '').trim(),
@@ -85,7 +65,8 @@ export function parseRocketReport(
       shippingCost: parseFloat(String(row['COSTE DE ENVÍO (SIN IVA)'] || 0)) || 0,
       totalCost: parseFloat(String(row['COSTE TOTAL PEDIDO'] || 0)) || 0,
       orderDate: parseDate(row['Fecha del pedido']),
-      confirmDate: parseDate(row['Fecha confirmación'])
+      confirmDate: parseDate(row['Fecha confirmación']),
+      carrier
     })
   }
 

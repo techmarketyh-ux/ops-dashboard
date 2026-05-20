@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { parseTikTokReport, extractProductFromTikTok } from '@/lib/parsers/tiktok'
-import { parseMetaReport, extractProductFromMeta } from '@/lib/parsers/meta'
+import { parseTikTokReport } from '@/lib/parsers/tiktok'
+import { parseMetaReport } from '@/lib/parsers/meta'
 import { parseRocketReport } from '@/lib/parsers/rocket'
-import { parseShopifyReport } from '@/lib/parsers/shopify'
-import { computeMetrics } from '@/lib/metrics'
+import { parseShopifyOrdersReport } from '@/lib/parsers/shopify'
+import { computeMetrics, canonicalCampaignName } from '@/lib/metrics'
 import { buildAutoMappings } from '@/lib/matching'
-import { AdSpend, RocketOrder, ShopifyProduct } from '@/lib/types'
+import { AdSpend, RocketOrder, ShopifyOrder } from '@/lib/types'
 import * as XLSX from 'xlsx'
 
 export const maxDuration = 60
@@ -13,44 +13,39 @@ export const maxDuration = 60
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
-
     const adminRaw = formData.get('adminCosts') as string || '{}'
     const adminCosts: { payroll: number; tools: number } = JSON.parse(adminRaw)
 
     let adSpends: AdSpend[] = []
     let rocketOrders: RocketOrder[] = []
-    let shopifyProducts: ShopifyProduct[] = []
+    let shopifyOrders: ShopifyOrder[] = []
 
-    // ── Paso 1: Parsea Meta y TikTok para extraer nombres de campaña ──────────
-    const metaFiles = formData.getAll('meta') as File[]
-    for (const file of metaFiles) {
-      const buf = await file.arrayBuffer()
-      adSpends = [...adSpends, ...parseMetaReport(buf)]
+    // Parse Meta
+    for (const file of formData.getAll('meta') as File[]) {
+      adSpends = [...adSpends, ...parseMetaReport(await file.arrayBuffer())]
     }
 
-    const tiktokFiles = formData.getAll('tiktok') as File[]
-    for (const file of tiktokFiles) {
-      const buf = await file.arrayBuffer()
-      adSpends = [...adSpends, ...parseTikTokReport(buf)]
+    // Parse TikTok
+    for (const file of formData.getAll('tiktok') as File[]) {
+      adSpends = [...adSpends, ...parseTikTokReport(await file.arrayBuffer())]
     }
 
-    // Nombres canónicos = los que vienen de las campañas
-    const campaignNames = Array.from(new Set(adSpends.map(a => a.product).filter(Boolean)))
+    // Canonical campaign names
+    const campaignNames = Array.from(new Set(
+      adSpends.map(a => canonicalCampaignName(a.product)).filter(Boolean)
+    ))
 
-    // ── Paso 2: Parsea Shopify para extraer nombres de productos ──────────────
-    const shopifyFiles = formData.getAll('shopify') as File[]
-    for (const file of shopifyFiles) {
-      const text = await file.text()
-      shopifyProducts = [...shopifyProducts, ...parseShopifyReport(text)]
+    // Parse Shopify orders CSV
+    for (const file of formData.getAll('shopify') as File[]) {
+      shopifyOrders = [...shopifyOrders, ...parseShopifyOrdersReport(await file.text())]
     }
-    const shopifyNames = shopifyProducts.map(s => s.title)
 
-    // ── Paso 3: Parsea Rocket para extraer nombres de productos ───────────────
-    // Primera pasada: sin mapeo, solo para obtener nombres
-    const rocketFiles = formData.getAll('rocket') as File[]
+    // Get Rocket product names for auto-mapping
     const rocketNamesSet = new Set<string>()
-    for (const file of rocketFiles) {
+    const rocketBuffers: ArrayBuffer[] = []
+    for (const file of formData.getAll('rocket') as File[]) {
       const buf = await file.arrayBuffer()
+      rocketBuffers.push(buf)
       const wb = XLSX.read(buf, { type: 'array' })
       const ws = wb.Sheets[wb.SheetNames[0]]
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' })
@@ -59,18 +54,19 @@ export async function POST(req: NextRequest) {
         if (name) rocketNamesSet.add(name)
       }
     }
-    const rocketNames = Array.from(rocketNamesSet)
 
-    // ── Paso 4: Construye mapeos automáticos ──────────────────────────────────
+    // Shopify product names from orders
+    const shopifyProductNames = Array.from(new Set(shopifyOrders.map(o => o.product)))
+
+    // Auto-mapping
     const { rocketToCanonical, shopifyToCanonical } = buildAutoMappings(
       campaignNames,
-      rocketNames,
-      shopifyNames
+      Array.from(rocketNamesSet),
+      shopifyProductNames
     )
 
-    // ── Paso 5: Parsea Rocket con mapeo real ──────────────────────────────────
-    for (const file of rocketFiles) {
-      const buf = await file.arrayBuffer()
+    // Parse Rocket with mappings
+    for (const buf of rocketBuffers) {
       const orders = parseRocketReport(buf, rocketToCanonical)
       const orderMap = new Map(rocketOrders.map(o => [o.id, o]))
       for (const order of orders) {
@@ -80,14 +76,13 @@ export async function POST(req: NextRequest) {
       rocketOrders = Array.from(orderMap.values())
     }
 
-    // ── Paso 6: Aplica mapeo a Shopify ────────────────────────────────────────
-    shopifyProducts = shopifyProducts.map(p => ({
-      ...p,
-      title: shopifyToCanonical[p.title] || p.title
+    // Apply Shopify product mappings
+    shopifyOrders = shopifyOrders.map(o => ({
+      ...o,
+      product: shopifyToCanonical[o.product] || canonicalCampaignName(o.product)
     }))
 
-    // ── Paso 7: Calcula métricas ──────────────────────────────────────────────
-    const metrics = computeMetrics(adSpends, rocketOrders, shopifyProducts, adminCosts)
+    const metrics = computeMetrics(adSpends, rocketOrders, shopifyOrders, adminCosts)
 
     return NextResponse.json({ ok: true, metrics, mappings: { rocketToCanonical, shopifyToCanonical } })
   } catch (err) {

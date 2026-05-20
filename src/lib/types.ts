@@ -1,15 +1,13 @@
-// ── Tipos centrales del dashboard ──────────────────────────────────────────
-
 export interface ProductMapping {
-  campaignName: string   // nombre extraído de la campaña
-  rocketName: string     // nombre en Rocket
+  campaignName: string
+  rocketName: string
 }
 
 export interface AdSpend {
   product: string
   channel: 'shopify' | 'whatsapp'
   spend: number
-  conversations?: number  // solo WhatsApp
+  conversations?: number
   month: string
 }
 
@@ -29,6 +27,7 @@ export interface RocketOrder {
   totalCost: number
   orderDate: string
   confirmDate: string
+  carrier: string
 }
 
 export type RocketStatus =
@@ -38,6 +37,17 @@ export type RocketStatus =
   | 'pendiente'
   | 'no_confirmado'
 
+export interface ShopifyOrder {
+  shopifyId: string
+  orderName: string
+  product: string
+  clientName: string
+  phone: string
+  createdAt: string
+  total: number
+  qty: number
+}
+
 export interface ShopifyProduct {
   title: string
   orders: number
@@ -46,23 +56,24 @@ export interface ShopifyProduct {
   itemsSold: number
 }
 
+export interface CarrierStats {
+  [carrier: string]: { dispatched: number; delivered: number }
+}
+
 export interface ProductMetrics {
   product: string
-  // Shopify
   shopifyOrders: number
   shopifyDispatched: number
   shopifyConfirmRate: number
   shopifyCPA: number
   shopifyCPAReal: number
   shopifySpend: number
-  // WhatsApp
   whatsConversations: number
   whatsDispatched: number
-  whatsCAC: number       // costo por conversación
+  whatsCAC: number
   whatsCPAReal: number
   whatsCloseRate: number
   whatsSpend: number
-  // Logística
   delivered: number
   inTransit: number
   returned: number
@@ -70,7 +81,7 @@ export interface ProductMetrics {
   notConfirmed: number
   totalOrders: number
   deliveryRate: number
-  // Rentabilidad
+  carrierStats: CarrierStats
   revenue: number
   productCost: number
   shippingCostDelivered: number
@@ -94,11 +105,9 @@ export interface GeneralMetrics {
   totalNotConfirmed: number
   totalOrders: number
   deliveryRate: number
-  netProfitPerProduct: number  // suma profits sin gastos admin
-  adminCosts: {
-    payroll: number
-    tools: number
-  }
+  carrierStats: CarrierStats
+  netProfitPerProduct: number
+  adminCosts: { payroll: number; tools: number }
   netProfitGeneral: number
   accumulatedCapital: number
   roiGeneral: number
