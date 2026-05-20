@@ -47,7 +47,7 @@ export function computeMetrics(
 
   const products: ProductMetrics[] = []
 
-  for (const product of productSet) {
+  for (const product of Array.from(productSet)) {
     if (!product || product === 'sin-mes') continue
 
     // --- Ad spend ---
