@@ -54,13 +54,6 @@ export async function POST(req: NextRequest) {
 
     const metrics = computeMetrics(adSpends, rocketOrders, shopifyProducts, adminCosts)
 
-    // Sincroniza con Sheets en background sin bloquear la respuesta
-    if (process.env.GOOGLE_SPREADSHEET_ID && process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-      import('@/lib/sheets').then(({ syncToSheets }) => {
-        syncToSheets(metrics).catch(err => console.error('[sheets]', err))
-      })
-    }
-
     return NextResponse.json({ ok: true, metrics })
   } catch (err) {
     console.error('[process]', err)

@@ -453,6 +453,8 @@ function UploadPanel({ onProcessed }: { onProcessed: (m: GeneralMetrics) => void
       const data = await res.json()
       if (!data.ok) throw new Error(data.error)
       onProcessed(data.metrics)
+      // Sincroniza con Sheets en background
+      fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: data.metrics }) }).catch(() => {})
     } catch (e) {
       setError(String(e))
     } finally {
