@@ -27,7 +27,8 @@ export function parseTikTokReport(buffer: ArrayBuffer): AdSpend[] {
     const spend = parseFloat(String(row['Cost'] || 0)) || 0
     if (spend === 0) continue
 
-    const month = String(row['By month'] || '').slice(0, 7) // YYYY-MM
+    // Soporta "By Day" (reporte diario) y "By month" (reporte mensual)
+    const dateRaw = String(row['By Day'] || row['By month'] || '').slice(0, 10)
 
     const product = extractProductFromTikTok(campaignName)
 
@@ -35,7 +36,7 @@ export function parseTikTokReport(buffer: ArrayBuffer): AdSpend[] {
       product,
       channel: 'shopify',
       spend,
-      month: month || 'sin-mes'
+      month: dateRaw || 'sin-fecha'
     })
   }
 
