@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --green-bg: #EAF3DE; --green-text: #27500A; --green-border: #3B6D11;
+  --blue-bg: #E6F1FB;  --blue-text: #0C447C;  --blue-border: #185FA5;
+  --yellow-bg: #FAEEDA;--yellow-text: #633806; --yellow-border: #854F0B;
+  --red-bg: #FCEBEB;   --red-text: #791F1F;   --red-border: #A32D2D;
+}
+
+body { font-family: system-ui, -apple-system, sans-serif; background: #f8f7f4; }
+
+.metric-green  { background: var(--green-bg);  color: var(--green-text); }
+.metric-blue   { background: var(--blue-bg);   color: var(--blue-text); }
+.metric-yellow { background: var(--yellow-bg); color: var(--yellow-text); }
+.metric-red    { background: var(--red-bg);    color: var(--red-text); }
+.metric-gray   { background: #f1efe8;          color: #444441; }
+
+.pill-green  { background: var(--green-bg);  color: var(--green-text); }
+.pill-blue   { background: var(--blue-bg);   color: var(--blue-text); }
+.pill-yellow { background: var(--yellow-bg); color: var(--yellow-text); }
+.pill-red    { background: var(--red-bg);    color: var(--red-text); }
