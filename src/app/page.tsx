@@ -337,24 +337,24 @@ function UploadPanel({ onProcessed }: { onProcessed: (m: GeneralMetrics) => void
   const [tiktokFiles, setTiktokFiles] = useState<File[]>([])
   const [rocketFiles, setRocketFiles] = useState<File[]>([])
   const [shopifyFiles, setShopifyFiles] = useState<File[]>([])
+  const [mappingFiles, setMappingFiles] = useState<File[]>([])
   const [adminCosts] = useState({ payroll: 0, tools: 0 })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [detectedMappings, setDetectedMappings] = useState<{ rocket: Record<string,string>; shopify: Record<string,string> } | null>(null)
 
   async function handleProcess() {
-    setLoading(true); setError(''); setDetectedMappings(null)
+    setLoading(true); setError('')
     try {
       const fd = new FormData()
       metaFiles.forEach(f => fd.append('meta', f))
       tiktokFiles.forEach(f => fd.append('tiktok', f))
       rocketFiles.forEach(f => fd.append('rocket', f))
       shopifyFiles.forEach(f => fd.append('shopify', f))
+      mappingFiles.forEach(f => fd.append('mappings', f))
       fd.append('adminCosts', JSON.stringify(adminCosts))
       const res = await fetch('/api/process', { method: 'POST', body: fd })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error)
-      if (data.mappings) setDetectedMappings(data.mappings)
       onProcessed(data.metrics)
       fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: data.metrics }) }).catch(() => {})
     } catch (e) { setError(String(e)) } finally { setLoading(false) }
@@ -364,39 +364,20 @@ function UploadPanel({ onProcessed }: { onProcessed: (m: GeneralMetrics) => void
     <div className="max-w-4xl mx-auto px-6 py-8">
       <h1 className="text-xl font-medium text-gray-800 mb-1">Ops Dashboard</h1>
       <p className="text-sm text-gray-400 mb-6">Sube los reportes para calcular tus métricas</p>
-      <div className="grid grid-cols-2 gap-3 mb-6">
+      <div className="grid grid-cols-2 gap-3 mb-3">
         <UploadZone label="Meta Ads (.xlsx)" accept=".xlsx" multiple files={metaFiles} onFiles={setMetaFiles} />
         <UploadZone label="TikTok Ads (.xlsx)" accept=".xlsx" multiple files={tiktokFiles} onFiles={setTiktokFiles} />
         <UploadZone label="Rocket (.xlsx) — puede subir varios" accept=".xlsx" multiple files={rocketFiles} onFiles={setRocketFiles} />
         <UploadZone label="Shopify pedidos (.csv)" accept=".csv" multiple files={shopifyFiles} onFiles={setShopifyFiles} />
       </div>
-      {detectedMappings && (
-        <div className="mb-6 bg-white border border-gray-100 rounded-xl p-4">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Mapeos detectados automáticamente</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs font-medium text-gray-600 mb-2">Rocket → Campaña</p>
-              {Object.entries(detectedMappings.rocket).map(([k, v]) => (
-                <div key={k} className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-                  <span className="bg-gray-50 rounded px-2 py-0.5 truncate max-w-[140px]">{k}</span>
-                  <span className="text-gray-300">→</span>
-                  <span className="text-gray-700 font-medium truncate max-w-[140px]">{v}</span>
-                </div>
-              ))}
-            </div>
-            <div>
-              <p className="text-xs font-medium text-gray-600 mb-2">Shopify → Campaña</p>
-              {Object.entries(detectedMappings.shopify).map(([k, v]) => (
-                <div key={k} className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-                  <span className="bg-gray-50 rounded px-2 py-0.5 truncate max-w-[140px]">{k}</span>
-                  <span className="text-gray-300">→</span>
-                  <span className="text-gray-700 font-medium truncate max-w-[140px]">{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <div className="mb-6">
+        <UploadZone label="Mapeo de productos (.csv) — opcional pero recomendado" accept=".csv" files={mappingFiles} onFiles={setMappingFiles} />
+        {mappingFiles.length === 0 && (
+          <p className="text-xs text-gray-400 mt-2 text-center">
+            El CSV debe tener columnas: <code className="bg-gray-100 px-1 rounded">campaña,rocket,shopify</code>
+          </p>
+        )}
+      </div>
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
       <button onClick={handleProcess} disabled={loading}
         className="w-full py-3 rounded-xl bg-gray-900 text-white font-medium hover:bg-gray-700 disabled:opacity-50 transition-colors">
