@@ -11,7 +11,7 @@ function getAuth() {
 
 const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || ''
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 async function getSheets() {
   const auth = getAuth()
@@ -30,6 +30,7 @@ async function createSheet(sheets: ReturnType<typeof google.sheets>, title: stri
       requests: [{ addSheet: { properties: { title } } }]
     }
   })
+  await sleep(500)
 }
 
 async function writeRange(
@@ -43,6 +44,7 @@ async function writeRange(
     valueInputOption: 'USER_ENTERED',
     requestBody: { values }
   })
+  await sleep(300)
 }
 
 async function clearRange(sheets: ReturnType<typeof google.sheets>, range: string) {
@@ -50,9 +52,8 @@ async function clearRange(sheets: ReturnType<typeof google.sheets>, range: strin
     spreadsheetId: SPREADSHEET_ID,
     range
   })
+  await sleep(300)
 }
-
-// ── Escribir hoja de un producto ────────────────────────────────────────────
 
 async function writeProductSheet(
   sheets: ReturnType<typeof google.sheets>,
@@ -66,7 +67,6 @@ async function writeProductSheet(
   }
 
   const rows: (string | number)[][] = [
-    // Encabezado Shopify
     ['PEDIDOS SHOPIFY'],
     ['Gasto Ads', 'Pedidos Shopify', 'CPA', 'Despachados', '% Confirmación', 'CPA Real'],
     [
@@ -78,7 +78,6 @@ async function writeProductSheet(
       m.shopifyCPAReal.toFixed(2)
     ],
     [],
-    // Encabezado WhatsApp
     ['PEDIDOS WHATSAPP'],
     ['Gasto Ads', 'Conversaciones', 'Costo/Conv.', 'Despachados', 'CPA Real', '% Cierre'],
     [
@@ -90,7 +89,6 @@ async function writeProductSheet(
       (m.whatsCloseRate / 100).toFixed(4)
     ],
     [],
-    // Logística
     ['LOGÍSTICA'],
     ['Total Pedidos', 'Entregados', 'En Tránsito', 'Devueltos', 'Pendientes', 'No Confirmados', '% Entrega'],
     [
@@ -103,7 +101,6 @@ async function writeProductSheet(
       (m.deliveryRate / 100).toFixed(4)
     ],
     [],
-    // Rentabilidad
     ['RENTABILIDAD'],
     ['Recaudo', 'Costo Producto', 'Flete Entregados', 'Flete Devueltos', 'Fulfillment', 'Gasto Ads', 'Profit Neto', 'ROI', 'Margen Neto'],
     [
@@ -122,8 +119,6 @@ async function writeProductSheet(
   await clearRange(sheets, `${sheetName}!A1:Z100`)
   await writeRange(sheets, `${sheetName}!A1`, rows)
 }
-
-// ── Escribir hoja general ────────────────────────────────────────────────────
 
 async function writeGeneralSheet(
   sheets: ReturnType<typeof google.sheets>,
@@ -185,21 +180,18 @@ async function writeGeneralSheet(
   await writeRange(sheets, `${sheetName}!A1`, rows)
 }
 
-// ── Punto de entrada principal ───────────────────────────────────────────────
-
 export async function syncToSheets(metrics: GeneralMetrics) {
   const sheets = await getSheets()
   const existingSheets = await getSheetNames(sheets)
 
-  // Hoja general
   await writeGeneralSheet(sheets, metrics, existingSheets)
+  await sleep(1000)
 
-  // Una hoja por producto
   for (const product of metrics.products) {
     await writeProductSheet(sheets, product, existingSheets)
-    // Refresca la lista después de crear
     if (!existingSheets.includes(product.product.substring(0, 50))) {
       existingSheets.push(product.product.substring(0, 50))
     }
+    await sleep(1000)
   }
 }
