@@ -29,7 +29,7 @@ export function matchScore(nameA: string, nameB: string): number {
   if (kwA.size === 0 || kwB.size === 0) return 0
 
   let matches = 0
-  for (const w of kwA) {
+  for (const w of Array.from(kwA)) {
     if (kwB.has(w)) matches++
   }
 
