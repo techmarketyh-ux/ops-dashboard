@@ -1,11 +1,12 @@
 'use client'
-import { useState } from 'react'
-import { GeneralMetrics, ProductMetrics, CarrierStats } from '@/lib/types'
+import { useState, useMemo } from 'react'
+import { GeneralMetrics, ProductMetrics, CarrierStats, RawData, Filters } from '@/lib/types'
 import { colorCPA, colorConfirmRate, colorCPAReal, colorCostPerConv, colorCloseRate } from '@/lib/metrics'
+import { filterAndRecompute } from '@/lib/filterMetrics'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 
-function metricClass(color: string) { return `metric-${color} rounded-lg p-3` }
-function pillClass(color: string) { return `pill-${color} text-xs font-medium px-2 py-0.5 rounded-full inline-block` }
+function metricClass(c: string) { return `metric-${c} rounded-lg p-3` }
+function pillClass(c: string) { return `pill-${c} text-xs font-medium px-2 py-0.5 rounded-full inline-block` }
 function fmtUSD(n: number) { return n === 0 ? '—' : `$${n.toFixed(2)}` }
 function fmtPct(n: number) { return `${n.toFixed(1)}%` }
 function fmt(n: number, d = 2) { return n.toFixed(d) }
@@ -24,7 +25,7 @@ function UploadZone({ label, accept, multiple, files, onFiles }: { label: string
   return (
     <label className="flex flex-col items-center gap-2 border border-dashed border-gray-300 rounded-xl p-4 cursor-pointer hover:border-gray-400 transition-colors bg-white">
       <span className="text-sm font-medium text-gray-700">{label}</span>
-      <span className="text-xs text-gray-400">{files.length > 0 ? `${files.length} archivo(s) cargado(s)` : `Clic para subir`}</span>
+      <span className="text-xs text-gray-400">{files.length > 0 ? `✓ ${files.length} archivo(s)` : `Clic para subir`}</span>
       <input type="file" accept={accept} multiple={multiple} className="hidden" onChange={e => onFiles(Array.from(e.target.files || []))} />
     </label>
   )
@@ -34,17 +35,19 @@ function DeliveryPie({ delivered, inTransit, returned }: { delivered: number; in
   const total = delivered + inTransit + returned
   if (total === 0) return <div className="flex items-center justify-center h-[220px] text-gray-300 text-sm">Sin datos</div>
   const data = [
-    { name: 'Entregados', value: delivered, color: '#639922', pct: total > 0 ? (delivered/total*100).toFixed(1) : '0' },
-    { name: 'En tránsito', value: inTransit, color: '#378ADD', pct: total > 0 ? (inTransit/total*100).toFixed(1) : '0' },
-    { name: 'Devueltos', value: returned, color: '#E24B4A', pct: total > 0 ? (returned/total*100).toFixed(1) : '0' },
+    { name: 'Entregados', value: delivered, color: '#639922' },
+    { name: 'En tránsito', value: inTransit, color: '#378ADD' },
+    { name: 'Devueltos', value: returned, color: '#E24B4A' },
   ].filter(d => d.value > 0)
   return (
     <ResponsiveContainer width="100%" height={220}>
       <PieChart>
-        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} label={({ name, pct }) => `${name} ${pct}%`} labelLine={true} fontSize={11}>
+        <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75}
+          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(1)}%`} labelLine={true} fontSize={11}>
           {data.map((entry, i) => <Cell key={i} fill={entry.color} />)}
         </Pie>
-        <Tooltip formatter={(v: number, name: string) => [`${v} pedidos (${data.find(d=>d.name===name)?.pct}%)`, name]} />
+        <Tooltip formatter={(v: number) => [`${v} pedidos`]} />
+        <Legend />
       </PieChart>
     </ResponsiveContainer>
   )
@@ -75,14 +78,15 @@ function CarrierSection({ carrierStats }: { carrierStats: CarrierStats }) {
   )
 }
 
-// Filters bar
-function FiltersBar({ products, filters, onChange }: {
+function FiltersBar({ products, carriers, filters, onChange }: {
   products: string[]
-  filters: { product: string; channel: string; carrier: string; dateFrom: string; dateTo: string }
-  onChange: (f: typeof filters) => void
+  carriers: string[]
+  filters: Filters
+  onChange: (f: Filters) => void
 }) {
+  const hasFilter = filters.product || filters.channel || filters.carrier || filters.dateFrom || filters.dateTo
   return (
-    <div className="flex flex-wrap gap-2 mb-5 p-3 bg-gray-50 rounded-xl">
+    <div className="flex flex-wrap gap-2 mb-5 p-3 bg-gray-50 rounded-xl items-center">
       <select value={filters.product} onChange={e => onChange({...filters, product: e.target.value})}
         className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
         <option value="">Todos los productos</option>
@@ -97,39 +101,40 @@ function FiltersBar({ products, filters, onChange }: {
       <select value={filters.carrier} onChange={e => onChange({...filters, carrier: e.target.value})}
         className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none">
         <option value="">Todas las transportadoras</option>
-        <option value="Servientrega">Servientrega</option>
-        <option value="Gintracom">Gintracom</option>
+        {carriers.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
       <input type="date" value={filters.dateFrom} onChange={e => onChange({...filters, dateFrom: e.target.value})}
         className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none" />
+      <span className="text-xs text-gray-400">→</span>
       <input type="date" value={filters.dateTo} onChange={e => onChange({...filters, dateTo: e.target.value})}
         className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 outline-none" />
-      {(filters.product || filters.channel || filters.carrier || filters.dateFrom || filters.dateTo) && (
+      {hasFilter && (
         <button onClick={() => onChange({ product: '', channel: '', carrier: '', dateFrom: '', dateTo: '' })}
-          className="text-xs text-gray-400 hover:text-gray-600 px-2">✕ Limpiar</button>
+          className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded-lg border border-gray-200 bg-white">
+          ✕ Limpiar
+        </button>
       )}
     </div>
   )
 }
 
-function applyFilters(metrics: GeneralMetrics, filters: { product: string; channel: string; carrier: string; dateFrom: string; dateTo: string }): GeneralMetrics {
-  let products = [...metrics.products]
-  if (filters.product) products = products.filter(p => p.product === filters.product)
-  if (filters.carrier) {
-    products = products.map(p => ({
-      ...p,
-      carrierStats: Object.fromEntries(Object.entries(p.carrierStats).filter(([c]) => c === filters.carrier)),
-      delivered: filters.carrier ? (p.carrierStats[filters.carrier]?.delivered || 0) : p.delivered,
-      inTransit: p.inTransit,
-      returned: p.returned
-    }))
-  }
-  // Channel filter: show only relevant metrics
-  return { ...metrics, products }
-}
+function ProductDetail({ product, rawData, adminCosts, allCarriers, allProducts, onBack }: {
+  product: string
+  rawData: RawData
+  adminCosts: { payroll: number; tools: number }
+  allCarriers: string[]
+  allProducts: string[]
+  onBack: () => void
+}) {
+  const [filters, setFilters] = useState<Filters>({ product, channel: '', carrier: '', dateFrom: '', dateTo: '' })
 
-function ProductDetail({ m, onBack }: { m: ProductMetrics; onBack: () => void }) {
-  const [filters, setFilters] = useState({ product: '', channel: '', carrier: '', dateFrom: '', dateTo: '' })
+  const metrics = useMemo(() => {
+    return filterAndRecompute(rawData.adSpends, rawData.rocketOrders, rawData.shopifyOrders, filters, adminCosts)
+  }, [filters, rawData, adminCosts])
+
+  const m = metrics.products.find(p => p.product === product) || metrics.products[0]
+  if (!m) return <div className="text-gray-400 text-sm p-4">Sin datos para este producto con los filtros aplicados</div>
+
   const showShopify = !filters.channel || filters.channel === 'shopify'
   const showWhats = !filters.channel || filters.channel === 'whatsapp'
 
@@ -137,20 +142,37 @@ function ProductDetail({ m, onBack }: { m: ProductMetrics; onBack: () => void })
     <div>
       <div className="flex items-center gap-3 mb-4">
         <button onClick={onBack} className="text-sm text-gray-400 hover:text-gray-600">← volver</button>
-        <h2 className="text-lg font-medium text-gray-900">{m.product}</h2>
+        <h2 className="text-lg font-medium text-gray-900">{product}</h2>
       </div>
 
-      <FiltersBar products={[]} filters={filters} onChange={setFilters} />
+      <FiltersBar products={allProducts} carriers={allCarriers} filters={filters}
+        onChange={f => setFilters({ ...f, product })} />
 
       {showShopify && (
         <div className="mb-6">
           <span className="text-xs font-medium px-3 py-1 rounded-full bg-[#E1F5EE] text-[#0F6E56] mb-3 inline-block">Shopify</span>
-          <div className="grid grid-cols-5 gap-2 mb-3">
+          <div className="grid grid-cols-5 gap-2">
             <MetricCard label="Pedidos" value={String(m.shopifyOrders)} color="gray" />
             <MetricCard label="CPA" value={fmtUSD(m.shopifyCPA)} color={colorCPA(m.shopifyCPA)} />
             <MetricCard label="Despachos" value={String(m.shopifyDispatched)} color="gray" />
             <MetricCard label="% Confirmación" value={fmtPct(m.shopifyConfirmRate)} color={colorConfirmRate(m.shopifyConfirmRate)} />
             <MetricCard label="CPA Real" value={fmtUSD(m.shopifyCPAReal)} color={colorCPAReal(m.shopifyCPAReal)} />
+          </div>
+          <div className="mt-2 bg-white border border-gray-100 rounded-xl overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50"><tr>
+                {['Gasto Ads','Pedidos','Despachos','% Confirm.','CPA','CPA Real'].map(h =>
+                  <th key={h} className="text-left px-3 py-2 text-gray-400 font-medium uppercase tracking-wide text-[10px]">{h}</th>)}
+              </tr></thead>
+              <tbody><tr className="border-t border-gray-50">
+                <td className="px-3 py-2">{fmtUSD(m.shopifySpend)}</td>
+                <td className="px-3 py-2">{m.shopifyOrders}</td>
+                <td className="px-3 py-2">{m.shopifyDispatched}</td>
+                <td className="px-3 py-2"><span className={pillClass(colorConfirmRate(m.shopifyConfirmRate))}>{fmtPct(m.shopifyConfirmRate)}</span></td>
+                <td className="px-3 py-2"><span className={pillClass(colorCPA(m.shopifyCPA))}>{fmtUSD(m.shopifyCPA)}</span></td>
+                <td className="px-3 py-2"><span className={pillClass(colorCPAReal(m.shopifyCPAReal))}>{fmtUSD(m.shopifyCPAReal)}</span></td>
+              </tr></tbody>
+            </table>
           </div>
         </div>
       )}
@@ -164,12 +186,28 @@ function ProductDetail({ m, onBack }: { m: ProductMetrics; onBack: () => void })
             <MetricCard label="CPA Real" value={fmtUSD(m.whatsCPAReal)} color={colorCPAReal(m.whatsCPAReal)} />
             <MetricCard label="% Cierre" value={fmtPct(m.whatsCloseRate)} color={colorCloseRate(m.whatsCloseRate)} />
           </div>
+          <div className="mt-2 bg-white border border-gray-100 rounded-xl overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50"><tr>
+                {['Gasto Ads','Conversaciones','Costo/Conv.','Despachos','CPA Real','% Cierre'].map(h =>
+                  <th key={h} className="text-left px-3 py-2 text-gray-400 font-medium uppercase tracking-wide text-[10px]">{h}</th>)}
+              </tr></thead>
+              <tbody><tr className="border-t border-gray-50">
+                <td className="px-3 py-2">{fmtUSD(m.whatsSpend)}</td>
+                <td className="px-3 py-2">{m.whatsConversations}</td>
+                <td className="px-3 py-2"><span className={pillClass(colorCostPerConv(m.whatsCAC))}>{fmtUSD(m.whatsCAC)}</span></td>
+                <td className="px-3 py-2">{m.whatsDispatched}</td>
+                <td className="px-3 py-2"><span className={pillClass(colorCPAReal(m.whatsCPAReal))}>{fmtUSD(m.whatsCPAReal)}</span></td>
+                <td className="px-3 py-2"><span className={pillClass(colorCloseRate(m.whatsCloseRate))}>{fmtPct(m.whatsCloseRate)}</span></td>
+              </tr></tbody>
+            </table>
+          </div>
         </div>
       )}
 
       <hr className="border-gray-100 my-4" />
       <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Logística y entregas</h3>
-      <div className="grid grid-cols-2 gap-6 mb-4">
+      <div className="grid grid-cols-2 gap-6 mb-2">
         <div className="grid grid-cols-2 gap-2">
           <MetricCard label="Entregados" value={String(m.delivered)} color="green" />
           <MetricCard label="En tránsito" value={String(m.inTransit)} color="blue" />
@@ -189,7 +227,7 @@ function ProductDetail({ m, onBack }: { m: ProductMetrics; onBack: () => void })
         <MetricCard label="Flete devueltos" value={fmtUSD(m.shippingCostReturned)} color="gray" />
       </div>
       <div className="grid grid-cols-4 gap-2">
-        <MetricCard label="Fulfillment" value={fmtUSD(m.fulfillment)} color="gray" />
+        <MetricCard label="Fulfillment ($0.85/u)" value={fmtUSD(m.fulfillment)} color="gray" />
         <MetricCard label="Gasto Ads" value={fmtUSD(m.totalAdSpend)} color="gray" />
         <MetricCard label="Profit neto" value={fmtUSD(m.netProfit)} color={m.netProfit >= 0 ? 'green' : 'red'} />
         <MetricCard label="ROI" value={fmt(m.roi, 3)} color={m.roi >= 0 ? 'green' : 'red'} />
@@ -201,16 +239,25 @@ function ProductDetail({ m, onBack }: { m: ProductMetrics; onBack: () => void })
   )
 }
 
-function GeneralView({ metrics, adminCosts, onAdminChange, onSelectProduct }: {
-  metrics: GeneralMetrics
+function GeneralView({ rawData, baseMetrics, adminCosts, onAdminChange, onSelectProduct }: {
+  rawData: RawData
+  baseMetrics: GeneralMetrics
   adminCosts: { payroll: number; tools: number }
   onAdminChange: (k: 'payroll' | 'tools', v: number) => void
-  onSelectProduct: (p: ProductMetrics) => void
+  onSelectProduct: (product: string) => void
 }) {
-  const [filters, setFilters] = useState({ product: '', channel: '', carrier: '', dateFrom: '', dateTo: '' })
-  const filtered = applyFilters(metrics, filters)
-  const products = filtered.products
+  const [filters, setFilters] = useState<Filters>({ product: '', channel: '', carrier: '', dateFrom: '', dateTo: '' })
 
+  const metrics = useMemo(() => {
+    const hasFilter = filters.product || filters.channel || filters.carrier || filters.dateFrom || filters.dateTo
+    if (!hasFilter) return baseMetrics
+    return filterAndRecompute(rawData.adSpends, rawData.rocketOrders, rawData.shopifyOrders, filters, adminCosts)
+  }, [filters, rawData, adminCosts, baseMetrics])
+
+  const allCarriers = useMemo(() => Array.from(new Set(rawData.rocketOrders.map(o => o.carrier).filter(Boolean))), [rawData])
+  const allProducts = baseMetrics.products.map(p => p.product)
+
+  const products = metrics.products
   const totalShopifyOrders = products.reduce((s, p) => s + p.shopifyOrders, 0)
   const totalShopifyDispatched = products.reduce((s, p) => s + p.shopifyDispatched, 0)
   const totalShopifySpend = products.reduce((s, p) => s + p.shopifySpend, 0)
@@ -242,7 +289,7 @@ function GeneralView({ metrics, adminCosts, onAdminChange, onSelectProduct }: {
         ))}
       </div>
 
-      <FiltersBar products={metrics.products.map(p => p.product)} filters={filters} onChange={setFilters} />
+      <FiltersBar products={allProducts} carriers={allCarriers} filters={filters} onChange={setFilters} />
 
       {showShopify && (
         <div className="mb-6">
@@ -273,7 +320,7 @@ function GeneralView({ metrics, adminCosts, onAdminChange, onSelectProduct }: {
       <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Por producto</h3>
       <div className="grid grid-cols-3 gap-3 mb-6">
         {products.map(p => (
-          <button key={p.product} onClick={() => onSelectProduct(p)}
+          <button key={p.product} onClick={() => onSelectProduct(p.product)}
             className="text-left bg-white border border-gray-100 rounded-xl p-3 hover:border-gray-300 transition-colors">
             <p className="text-sm font-medium text-gray-800 mb-2">{p.product}</p>
             <div className="grid grid-cols-2 gap-1.5">
@@ -288,7 +335,7 @@ function GeneralView({ metrics, adminCosts, onAdminChange, onSelectProduct }: {
 
       <hr className="border-gray-100 my-4" />
       <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Logística general</h3>
-      <div className="grid grid-cols-2 gap-6 mb-4">
+      <div className="grid grid-cols-2 gap-6 mb-2">
         <div className="grid grid-cols-2 gap-2">
           <MetricCard label="Entregados" value={String(totalDelivered)} color="green" />
           <MetricCard label="En tránsito" value={String(totalInTransit)} color="blue" />
@@ -297,7 +344,7 @@ function GeneralView({ metrics, adminCosts, onAdminChange, onSelectProduct }: {
         </div>
         <DeliveryPie delivered={totalDelivered} inTransit={totalInTransit} returned={totalReturned} />
       </div>
-      <CarrierSection carrierStats={filtered.carrierStats} />
+      <CarrierSection carrierStats={metrics.carrierStats} />
 
       <hr className="border-gray-100 my-4" />
       <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Rentabilidad general</h3>
@@ -314,25 +361,25 @@ function GeneralView({ metrics, adminCosts, onAdminChange, onSelectProduct }: {
         </div>
       </div>
       <div className="grid grid-cols-4 gap-2 mb-2">
-        <MetricCard label="Profit neto (sin admin)" value={fmtUSD(filtered.netProfitPerProduct)} color={filtered.netProfitPerProduct >= 0 ? 'green' : 'red'} />
-        <MetricCard label="Profit neto general" value={fmtUSD(filtered.netProfitGeneral)} color={filtered.netProfitGeneral >= 0 ? 'green' : 'red'} />
-        <MetricCard label="Capital acumulado" value={fmtUSD(filtered.accumulatedCapital)} color={filtered.accumulatedCapital >= 0 ? 'green' : 'red'} />
-        <MetricCard label="ROI general" value={fmt(filtered.roiGeneral, 3)} color={filtered.roiGeneral >= 0 ? 'green' : 'red'} />
+        <MetricCard label="Profit neto (sin admin)" value={fmtUSD(metrics.netProfitPerProduct)} color={metrics.netProfitPerProduct >= 0 ? 'green' : 'red'} />
+        <MetricCard label="Profit neto general" value={fmtUSD(metrics.netProfitGeneral)} color={metrics.netProfitGeneral >= 0 ? 'green' : 'red'} />
+        <MetricCard label="Capital acumulado" value={fmtUSD(metrics.accumulatedCapital)} color={metrics.accumulatedCapital >= 0 ? 'green' : 'red'} />
+        <MetricCard label="ROI general" value={fmt(metrics.roiGeneral, 3)} color={metrics.roiGeneral >= 0 ? 'green' : 'red'} />
       </div>
 
       <hr className="border-gray-100 my-4" />
-      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Proyecciones — {filtered.totalInTransit} pedidos en tránsito</h3>
+      <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Proyecciones — {metrics.totalInTransit} pedidos en tránsito</h3>
       <div className="grid grid-cols-4 gap-2">
         {([40,50,60,70] as const).map((rate, i) => {
-          const val = [filtered.projections.rate40, filtered.projections.rate50, filtered.projections.rate60, filtered.projections.rate70][i]
-          return <MetricCard key={rate} label={`Si entrega ${rate}%`} value={fmtUSD(val)} color={val >= 0 ? 'green' : 'red'} sub={`${Math.round(filtered.totalInTransit * rate/100)} pedidos`} />
+          const val = [metrics.projections.rate40, metrics.projections.rate50, metrics.projections.rate60, metrics.projections.rate70][i]
+          return <MetricCard key={rate} label={`Si entrega ${rate}%`} value={fmtUSD(val)} color={val >= 0 ? 'green' : 'red'} sub={`${Math.round(metrics.totalInTransit * rate/100)} pedidos`} />
         })}
       </div>
     </div>
   )
 }
 
-function UploadPanel({ onProcessed }: { onProcessed: (m: GeneralMetrics) => void }) {
+function UploadPanel({ onProcessed }: { onProcessed: (m: GeneralMetrics, raw: RawData) => void }) {
   const [metaFiles, setMetaFiles] = useState<File[]>([])
   const [tiktokFiles, setTiktokFiles] = useState<File[]>([])
   const [rocketFiles, setRocketFiles] = useState<File[]>([])
@@ -355,7 +402,7 @@ function UploadPanel({ onProcessed }: { onProcessed: (m: GeneralMetrics) => void
       const res = await fetch('/api/process', { method: 'POST', body: fd })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error)
-      onProcessed(data.metrics)
+      onProcessed(data.metrics, data.rawData)
       fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: data.metrics }) }).catch(() => {})
     } catch (e) { setError(String(e)) } finally { setLoading(false) }
   }
@@ -371,11 +418,9 @@ function UploadPanel({ onProcessed }: { onProcessed: (m: GeneralMetrics) => void
         <UploadZone label="Shopify pedidos (.csv)" accept=".csv" multiple files={shopifyFiles} onFiles={setShopifyFiles} />
       </div>
       <div className="mb-6">
-        <UploadZone label="Mapeo de productos (.csv) — opcional pero recomendado" accept=".csv" files={mappingFiles} onFiles={setMappingFiles} />
+        <UploadZone label="Mapeo de productos (.csv)" accept=".csv" files={mappingFiles} onFiles={setMappingFiles} />
         {mappingFiles.length === 0 && (
-          <p className="text-xs text-gray-400 mt-2 text-center">
-            El CSV debe tener columnas: <code className="bg-gray-100 px-1 rounded">campaña,rocket,shopify</code>
-          </p>
+          <p className="text-xs text-gray-400 mt-2 text-center">Columnas: <code className="bg-gray-100 px-1 rounded">campaña,rocket,shopify</code></p>
         )}
       </div>
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
@@ -389,14 +434,21 @@ function UploadPanel({ onProcessed }: { onProcessed: (m: GeneralMetrics) => void
 
 export default function Page() {
   const [metrics, setMetrics] = useState<GeneralMetrics | null>(null)
-  const [activeProduct, setActiveProduct] = useState<ProductMetrics | null>(null)
+  const [rawData, setRawData] = useState<RawData | null>(null)
+  const [activeProduct, setActiveProduct] = useState<string | null>(null)
   const [adminCosts, setAdminCosts] = useState({ payroll: 0, tools: 0 })
   const [showUpload, setShowUpload] = useState(false)
 
-  if (!metrics || showUpload) {
+  const allCarriers = useMemo(() =>
+    rawData ? Array.from(new Set(rawData.rocketOrders.map(o => o.carrier).filter(Boolean))) : []
+  , [rawData])
+
+  const allProducts = metrics?.products.map(p => p.product) || []
+
+  if (!metrics || !rawData || showUpload) {
     return (
       <div className="min-h-screen bg-[#f8f7f4]">
-        <UploadPanel onProcessed={m => { setMetrics(m); setShowUpload(false) }} />
+        <UploadPanel onProcessed={(m, raw) => { setMetrics(m); setRawData(raw); setShowUpload(false) }} />
       </div>
     )
   }
@@ -413,20 +465,31 @@ export default function Page() {
             className={`px-4 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${!activeProduct ? 'bg-white text-gray-800 border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}>
             Resumen general
           </button>
-          {metrics.products.map(p => (
-            <button key={p.product} onClick={() => setActiveProduct(p)}
-              className={`px-4 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${activeProduct?.product === p.product ? 'bg-white text-gray-800 border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}>
-              {p.product}
+          {allProducts.map(p => (
+            <button key={p} onClick={() => setActiveProduct(p)}
+              className={`px-4 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${activeProduct === p ? 'bg-white text-gray-800 border border-gray-100' : 'text-gray-500 hover:text-gray-700'}`}>
+              {p}
             </button>
           ))}
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-6">
           {activeProduct ? (
-            <ProductDetail m={activeProduct} onBack={() => setActiveProduct(null)} />
+            <ProductDetail
+              product={activeProduct}
+              rawData={rawData}
+              adminCosts={adminCosts}
+              allCarriers={allCarriers}
+              allProducts={allProducts}
+              onBack={() => setActiveProduct(null)}
+            />
           ) : (
-            <GeneralView metrics={metrics} adminCosts={adminCosts}
+            <GeneralView
+              rawData={rawData}
+              baseMetrics={metrics}
+              adminCosts={adminCosts}
               onAdminChange={(k, v) => setAdminCosts(prev => ({...prev, [k]: v}))}
-              onSelectProduct={setActiveProduct} />
+              onSelectProduct={setActiveProduct}
+            />
           )}
         </div>
       </div>

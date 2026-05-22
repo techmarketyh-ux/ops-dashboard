@@ -118,3 +118,18 @@ export interface GeneralMetrics {
     rate70: number
   }
 }
+
+// Raw data returned to frontend for client-side filtering
+export interface RawData {
+  adSpends: AdSpend[]
+  rocketOrders: RocketOrder[]
+  shopifyOrders: ShopifyOrder[]
+}
+
+export interface Filters {
+  product: string
+  channel: string
+  carrier: string
+  dateFrom: string
+  dateTo: string
+}

@@ -21,37 +21,36 @@ export async function POST(req: NextRequest) {
     let rocketMap: Record<string, string> = {}
     let shopifyMap: Record<string, string> = {}
 
-    // Parse mappings CSV if provided
-    const mappingFiles = formData.getAll('mappings') as File[]
-    for (const file of mappingFiles) {
-      const text = await file.text()
-      const maps = parseMappingsCSV(text)
+    // Parse mappings CSV
+    for (const file of formData.getAll('mappings') as File[]) {
+      const maps = parseMappingsCSV(await file.text())
       rocketMap = { ...rocketMap, ...buildRocketMap(maps) }
       shopifyMap = { ...shopifyMap, ...buildShopifyMap(maps) }
     }
 
-    // Parse Meta
+    // Parse Meta — daily dates
     for (const file of formData.getAll('meta') as File[]) {
       adSpends = [...adSpends, ...parseMetaReport(await file.arrayBuffer())]
     }
 
-    // Parse TikTok
+    // Parse TikTok — daily dates
     for (const file of formData.getAll('tiktok') as File[]) {
       adSpends = [...adSpends, ...parseTikTokReport(await file.arrayBuffer())]
     }
+
+    // Apply canonical names to adSpends
+    adSpends = adSpends.map(a => ({ ...a, product: canonicalCampaignName(a.product) }))
 
     // Parse Shopify orders
     for (const file of formData.getAll('shopify') as File[]) {
       shopifyOrders = [...shopifyOrders, ...parseShopifyOrdersReport(await file.text())]
     }
-
-    // Apply Shopify mapping
     shopifyOrders = shopifyOrders.map(o => ({
       ...o,
       product: shopifyMap[o.product] || canonicalCampaignName(o.product)
     }))
 
-    // Parse Rocket with mapping
+    // Parse Rocket
     for (const file of formData.getAll('rocket') as File[]) {
       const buf = await file.arrayBuffer()
       const orders = parseRocketReport(buf, rocketMap)
@@ -65,7 +64,12 @@ export async function POST(req: NextRequest) {
 
     const metrics = computeMetrics(adSpends, rocketOrders, shopifyOrders, adminCosts)
 
-    return NextResponse.json({ ok: true, metrics })
+    // Return raw data for client-side filtering
+    return NextResponse.json({
+      ok: true,
+      metrics,
+      rawData: { adSpends, rocketOrders, shopifyOrders }
+    })
   } catch (err) {
     console.error('[process]', err)
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
